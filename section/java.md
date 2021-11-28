@@ -4,10 +4,267 @@
 ## 
 
 
+## 历史
 
+
+* 8u121加入了UseCGroupMemoryLimitForHeap这一参数
+* 8u191后加入了UseContainerSupport、MaxRAMPercentage
 
 ## 附录
 
+
+`osContainer_linux.cpp`
+~~~
+/* init
+ *
+ * Initialize the container support and determine if
+ * we are running under cgroup control.
+ */
+void OSContainer::init() {
+  int mountid;
+  int parentid;
+  int major;
+  int minor;
+  FILE *mntinfo = NULL;
+  FILE *cgroup = NULL;
+  char buf[MAXPATHLEN+1];
+  char tmproot[MAXPATHLEN+1];
+  char tmpmount[MAXPATHLEN+1];
+  char tmpbase[MAXPATHLEN+1];
+  char *p;
+  jlong mem_limit;
+
+  assert(!_is_initialized, "Initializing OSContainer more than once");
+
+  _is_initialized = true;
+  _is_containerized = false;
+
+  _unlimited_memory = (LONG_MAX / os::vm_page_size()) * os::vm_page_size();
+
+  if (PrintContainerInfo) {
+    tty->print_cr("OSContainer::init: Initializing Container Support");
+  }
+  if (!UseContainerSupport) {
+    if (PrintContainerInfo) {
+      tty->print_cr("Container Support not enabled");
+    }
+    return;
+  }
+
+  /*
+   * Find the cgroup mount point for memory and cpuset
+   * by reading /proc/self/mountinfo
+   *
+   * Example for docker:
+   * 219 214 0:29 /docker/7208cebd00fa5f2e342b1094f7bed87fa25661471a4637118e65f1c995be8a34 /sys/fs/cgroup/memory ro,nosuid,nodev,noexec,relatime - cgroup cgroup rw,memory
+   *
+   * Example for host:
+   * 34 28 0:29 / /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime shared:16 - cgroup cgroup rw,memory
+   */
+  mntinfo = fopen("/proc/self/mountinfo", "r");
+  if (mntinfo == NULL) {
+      if (PrintContainerInfo) {
+        tty->print_cr("Can't open /proc/self/mountinfo, %s",
+                       strerror(errno));
+      }
+      return;
+  }
+
+  while ( (p = fgets(buf, MAXPATHLEN, mntinfo)) != NULL) {
+    // Look for the filesystem type and see if it's cgroup
+    char fstype[MAXPATHLEN+1];
+    fstype[0] = '\0';
+    char *s =  strstr(p, " - ");
+    if (s != NULL &&
+        sscanf(s, " - %s", fstype) == 1 &&
+        strcmp(fstype, "cgroup") == 0) {
+
+      if (strstr(p, "memory") != NULL) {
+        int matched = sscanf(p, "%d %d %d:%d %s %s",
+                             &mountid,
+                             &parentid,
+                             &major,
+                             &minor,
+                             tmproot,
+                             tmpmount);
+        if (matched == 6) {
+          memory = new CgroupSubsystem(tmproot, tmpmount);
+        }
+        else
+          if (PrintContainerInfo) {
+            tty->print_cr("Incompatible str containing cgroup and memory: %s", p);
+          }
+      } else if (strstr(p, "cpuset") != NULL) {
+        int matched = sscanf(p, "%d %d %d:%d %s %s",
+                             &mountid,
+                             &parentid,
+                             &major,
+                             &minor,
+                             tmproot,
+                             tmpmount);
+        if (matched == 6) {
+          cpuset = new CgroupSubsystem(tmproot, tmpmount);
+        }
+        else {
+          if (PrintContainerInfo) {
+            tty->print_cr("Incompatible str containing cgroup and cpuset: %s", p);
+          }
+        }
+      } else if (strstr(p, "cpu,cpuacct") != NULL || strstr(p, "cpuacct,cpu") != NULL) {
+        int matched = sscanf(p, "%d %d %d:%d %s %s",
+                             &mountid,
+                             &parentid,
+                             &major,
+                             &minor,
+                             tmproot,
+                             tmpmount);
+        if (matched == 6) {
+          cpu = new CgroupSubsystem(tmproot, tmpmount);
+          cpuacct = new CgroupSubsystem(tmproot, tmpmount);
+        }
+        else {
+          if (PrintContainerInfo) {
+            tty->print_cr("Incompatible str containing cgroup and cpu,cpuacct: %s", p);
+          }
+        }
+      } else if (strstr(p, "cpuacct") != NULL) {
+        int matched = sscanf(p, "%d %d %d:%d %s %s",
+                             &mountid,
+                             &parentid,
+                             &major,
+                             &minor,
+                             tmproot,
+                             tmpmount);
+        if (matched == 6) {
+          cpuacct = new CgroupSubsystem(tmproot, tmpmount);
+        }
+        else {
+          if (PrintContainerInfo) {
+            tty->print_cr("Incompatible str containing cgroup and cpuacct: %s", p);
+          }
+        }
+      } else if (strstr(p, "cpu") != NULL) {
+        int matched = sscanf(p, "%d %d %d:%d %s %s",
+                             &mountid,
+                             &parentid,
+                             &major,
+                             &minor,
+                             tmproot,
+                             tmpmount);
+        if (matched == 6) {
+          cpu = new CgroupSubsystem(tmproot, tmpmount);
+        }
+        else {
+          if (PrintContainerInfo) {
+            tty->print_cr("Incompatible str containing cgroup and cpu: %s", p);
+          }
+        }
+      }
+    }
+  }
+
+  fclose(mntinfo);
+
+  if (memory == NULL) {
+    if (PrintContainerInfo) {
+      tty->print_cr("Required cgroup memory subsystem not found");
+    }
+    return;
+  }
+  if (cpuset == NULL) {
+    if (PrintContainerInfo) {
+      tty->print_cr("Required cgroup cpuset subsystem not found");
+    }
+    return;
+  }
+  if (cpu == NULL) {
+    if (PrintContainerInfo) {
+      tty->print_cr("Required cgroup cpu subsystem not found");
+    }
+    return;
+  }
+  if (cpuacct == NULL) {
+    if (PrintContainerInfo) {
+      tty->print_cr("Required cgroup cpuacct subsystem not found");
+    }
+    return;
+  }
+
+  /*
+   * Read /proc/self/cgroup and map host mount point to
+   * local one via /proc/self/mountinfo content above
+   *
+   * Docker example:
+   * 5:memory:/docker/6558aed8fc662b194323ceab5b964f69cf36b3e8af877a14b80256e93aecb044
+   *
+   * Host example:
+   * 5:memory:/user.slice
+   *
+   * Construct a path to the process specific memory and cpuset
+   * cgroup directory.
+   *
+   * For a container running under Docker from memory example above
+   * the paths would be:
+   *
+   * /sys/fs/cgroup/memory
+   *
+   * For a Host from memory example above the path would be:
+   *
+   * /sys/fs/cgroup/memory/user.slice
+   *
+   */
+  cgroup = fopen("/proc/self/cgroup", "r");
+  if (cgroup == NULL) {
+    if (PrintContainerInfo) {
+      tty->print_cr("Can't open /proc/self/cgroup, %s",
+                     strerror(errno));
+      }
+    return;
+  }
+
+  while ( (p = fgets(buf, MAXPATHLEN, cgroup)) != NULL) {
+    int cgno;
+    int matched;
+    char *controller;
+    char *base;
+
+    /* Skip cgroup number */
+    strsep(&p, ":");
+    /* Get controller and base */
+    controller = strsep(&p, ":");
+    base = strsep(&p, "\n");
+
+    if (controller != NULL) {
+      if (strstr(controller, "memory") != NULL) {
+        memory->set_subsystem_path(base);
+      } else if (strstr(controller, "cpuset") != NULL) {
+        cpuset->set_subsystem_path(base);
+      } else if (strstr(controller, "cpu,cpuacct") != NULL || strstr(controller, "cpuacct,cpu") != NULL) {
+        cpu->set_subsystem_path(base);
+        cpuacct->set_subsystem_path(base);
+      } else if (strstr(controller, "cpuacct") != NULL) {
+        cpuacct->set_subsystem_path(base);
+      } else if (strstr(controller, "cpu") != NULL) {
+        cpu->set_subsystem_path(base);
+      }
+    }
+  }
+
+  fclose(cgroup);
+
+  // We need to update the amount of physical memory now that
+  // command line arguments have been processed.
+  if ((mem_limit = memory_limit_in_bytes()) > 0) {
+    os::Linux::set_physical_memory(mem_limit);
+  }
+
+  _is_containerized = true;
+
+}
+
+~~~
+
+`arguments.cpp`
 
 ~~~
 void Arguments::set_heap_size() {
@@ -120,4 +377,8 @@ void Arguments::set_heap_size() {
 
 ## reference
 
-[1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)
+[1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)  
+[2][java|Java Platform, Standard Edition Tools Reference](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/java.html)  
+[3][]()
+
+
