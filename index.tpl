@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta content="width=device-width, initial-scale=1" name="viewport">
-<link rel="icon" href="assert/t.png">
+<link rel="icon" href="asset/t.png">
 <title>Java9模块化</title>
 <style>
 body {
@@ -227,7 +227,7 @@ display: none;
 <x-index />
 </nav>
 <article>
-	<x-markdown src="section/java11.md" />
+	<x-markdown src="section/java.md" />
 </article>
 <!--<footer>
 	place license markdown file
