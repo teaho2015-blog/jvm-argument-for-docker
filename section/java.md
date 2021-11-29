@@ -1,24 +1,37 @@
 ## 简介
 
+现在是云原生时代。作为开发的我（们）或多说少在平常和工作中和docker或k8s打过交道。而作为JAVA开发者，我们多少会对JVM参数进行调优。  
+不知道大家有没有遇到过类似情况：在容器环境下，设置-Xmx报错。  
+没有也没关系，今天我们来探究下，容器环境下如何设置JAVA参数。
 
-## 
+### 历史
+
+* JDK8u121加入了UseCGroupMemoryLimitForHeap这一参数。(JDK-8170888)
+* JDK8u191后加入了UseContainerSupport、MaxRAMPercentage、MinRAMPercentage、InitialRAMPercentage参数。
+
+## 用法
+
+建议使用大于8u191版本的JAVA。
+
+### java版本<8u121
+
+不要在容器化环境使用。
+
+### 8u121<java版本<8u191
 
 
-## 历史
+### java版本>=8u191
 
 
-* 8u121加入了UseCGroupMemoryLimitForHeap这一参数
-* 8u191后加入了UseContainerSupport、MaxRAMPercentage
 
-## 附录
+## OpenJDK相关源码解读
 
+我对相关方法做了注释。
 
 `osContainer_linux.cpp`
 ~~~
-/* init
- *
- * Initialize the container support and determine if
- * we are running under cgroup control.
+/* 
+ * 容器环境下的初始化和判定
  */
 void OSContainer::init() {
   int mountid;
@@ -379,6 +392,6 @@ void Arguments::set_heap_size() {
 
 [1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)  
 [2][java|Java Platform, Standard Edition Tools Reference](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/java.html)  
-[3][]()
+
 
 
