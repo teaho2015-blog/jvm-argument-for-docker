@@ -7,7 +7,7 @@
 ### 历史
 
 * JDK8u121加入了UseCGroupMemoryLimitForHeap这一参数。(JDK-8170888)
-* JDK8u191后加入了UseContainerSupport、MaxRAMPercentage、MinRAMPercentage、InitialRAMPercentage参数。
+* JDK8u191后加入了UseContainerSupport、MaxRAMPercentage、MinRAMPercentage、InitialRAMPercentage参数。  
   deprecate了MaxRAMFraction、MinRAMFraction、InitialRAMFraction参数。
 
 ## 用法
