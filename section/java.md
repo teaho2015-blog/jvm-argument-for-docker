@@ -8,6 +8,7 @@
 
 * JDK8u121加入了UseCGroupMemoryLimitForHeap这一参数。(JDK-8170888)
 * JDK8u191后加入了UseContainerSupport、MaxRAMPercentage、MinRAMPercentage、InitialRAMPercentage参数。
+  deprecate了MaxRAMFraction、MinRAMFraction、InitialRAMFraction参数。
 
 ## 用法
 
@@ -19,16 +20,42 @@
 
 ### 8u121<java版本<8u191
 
+如果是使用OracleJDK需要额外开启实验参数
+`-XX:UnlockExperimentalVMOptions`。
+
+
+建议使用如下参数：
+````
+-XX:UseCGroupMemoryLimitForHeap -XX:MaxRAMFraction=2 -XX:MinRAMFraction=2
+````
+
+或自行设置
+
+~~~
+-Xmx:{用户自定义} 
+~~~
+
 
 ### java版本>=8u191
 
+JDK8u191后新增了容器支持开关`-XX:UseContainerSupport`，并且默认开启。
+
+建议使用内存参数参数：
+````
+-XX:MaxRAMPercentage=70 -XX:MinRAMPercentage=70
+````
+计算方法（这里做了简化，实际计算要复杂些）：  
+`最大堆大小 = MaxRAM（默认为容器最大可使用内存） * MaxRAMPercentage / 100`。  
+最小堆大小同理（InitialRAMPercentage和MinRAMPercentage设置一个即可）。
+
+注意：如果使用了-Xmx参数，则不会进入上面的堆大小的计算逻辑，而直接将MaxHeapSize（最大堆大小）等同于我们设置的-Xmx。
 
 
 ## OpenJDK相关源码解读
 
 我对相关方法做了注释。
 
-`osContainer_linux.cpp`
+`osContainer_linux.cpp`是linux的容器信息的读取和计算的类。里面有如下方法：
 ~~~
 /* init
  *
@@ -292,30 +319,67 @@ void OSContainer::init() {
 
 ~~~
 
-`arguments.cpp`
-
+`arguments.cpp`是对我们各种JVM参数做解析和设置的类，这里，我分析下set_heap_size（设置堆大小）这一方法。
 ~~~
 void Arguments::set_heap_size() {
+  if (!FLAG_IS_DEFAULT(DefaultMaxRAMFraction)) {
+    // Deprecated flag
+    FLAG_SET_CMDLINE(uintx, MaxRAMFraction, DefaultMaxRAMFraction);
+  }
+  //如果设置了MaxRAM，则使用
   julong phys_mem =
     FLAG_IS_DEFAULT(MaxRAM) ? MIN2(os::physical_memory(), (julong)MaxRAM)
                             : (julong)MaxRAM;
 
-  // Convert deprecated flags
+  // Experimental support for CGroup memory limits
+  //如果开启了UseCGroupMemoryLimitForHeap，则读取cgroup的内存，此选项已是deprecate选项
+  if (UseCGroupMemoryLimitForHeap) {
+    // This is a rough indicator that a CGroup limit may be in force
+    // for this process
+    const char* lim_file = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
+    FILE *fp = fopen(lim_file, "r");
+    if (fp != NULL) {
+      julong cgroup_max = 0;
+      int ret = fscanf(fp, JULONG_FORMAT, &cgroup_max);
+      if (ret == 1 && cgroup_max > 0) {
+        // If unlimited, cgroup_max will be a very large, but unspecified
+        // value, so use initial phys_mem as a limit
+        if (PrintGCDetails && Verbose) {
+          // Cannot use gclog_or_tty yet.
+          tty->print_cr("Setting phys_mem to the min of cgroup limit ("
+                        JULONG_FORMAT "MB) and initial phys_mem ("
+                        JULONG_FORMAT "MB)", cgroup_max/M, phys_mem/M);
+        }
+        //取cpgroup_max（有可能没限制）和物理内存的最小值
+        phys_mem = MIN2(cgroup_max, phys_mem);
+      } else {
+        warning("Unable to read/parse cgroup memory limit from %s: %s",
+                lim_file, errno != 0 ? strerror(errno) : "unknown error");
+      }
+      fclose(fp);
+    } else {
+      warning("Unable to open cgroup memory limit file %s (%s)", lim_file, strerror(errno));
+    }
+  }
+
+  // Convert Fraction to Precentage values
+  //注：MaxRAMFraction、MinRAMFraction、InitialRAMFraction皆为deprecate参数，不建议使用
   if (FLAG_IS_DEFAULT(MaxRAMPercentage) &&
       !FLAG_IS_DEFAULT(MaxRAMFraction))
     MaxRAMPercentage = 100.0 / MaxRAMFraction;
 
-  if (FLAG_IS_DEFAULT(MinRAMPercentage) &&
-      !FLAG_IS_DEFAULT(MinRAMFraction))
-    MinRAMPercentage = 100.0 / MinRAMFraction;
+   if (FLAG_IS_DEFAULT(MinRAMPercentage) &&
+       !FLAG_IS_DEFAULT(MinRAMFraction))
+     MinRAMPercentage = 100.0 / MinRAMFraction;
 
-  if (FLAG_IS_DEFAULT(InitialRAMPercentage) &&
-      !FLAG_IS_DEFAULT(InitialRAMFraction))
-    InitialRAMPercentage = 100.0 / InitialRAMFraction;
+   if (FLAG_IS_DEFAULT(InitialRAMPercentage) &&
+       !FLAG_IS_DEFAULT(InitialRAMFraction))
+     InitialRAMPercentage = 100.0 / InitialRAMFraction;
 
   // If the maximum heap size has not been set with -Xmx,
   // then set it as fraction of the size of physical memory,
   // respecting the maximum and minimum sizes of the heap.
+  //如果没有设置Xmx，则进入MaxHeapSize计算逻辑
   if (FLAG_IS_DEFAULT(MaxHeapSize)) {
     julong reasonable_max = (julong)((phys_mem * MaxRAMPercentage) / 100);
     const julong reasonable_min = (julong)((phys_mem * MinRAMPercentage) / 100);
@@ -335,20 +399,6 @@ void Arguments::set_heap_size() {
     if (UseCompressedOops) {
       // Limit the heap size to the maximum possible when using compressed oops
       julong max_coop_heap = (julong)max_heap_for_compressed_oops();
-
-      // HeapBaseMinAddress can be greater than default but not less than.
-      if (!FLAG_IS_DEFAULT(HeapBaseMinAddress)) {
-        if (HeapBaseMinAddress < DefaultHeapBaseMinAddress) {
-          // matches compressed oops printing flags
-          log_debug(gc, heap, coops)("HeapBaseMinAddress must be at least " SIZE_FORMAT
-                                     " (" SIZE_FORMAT "G) which is greater than value given " SIZE_FORMAT,
-                                     DefaultHeapBaseMinAddress,
-                                     DefaultHeapBaseMinAddress/G,
-                                     HeapBaseMinAddress);
-          FLAG_SET_ERGO(size_t, HeapBaseMinAddress, DefaultHeapBaseMinAddress);
-        }
-      }
-
       if (HeapBaseMinAddress + MaxHeapSize < max_coop_heap) {
         // Heap should be above HeapBaseMinAddress to get zero based compressed oops
         // but it should be not less than default MaxHeapSize.
@@ -366,12 +416,16 @@ void Arguments::set_heap_size() {
       reasonable_max = MAX2(reasonable_max, (julong)InitialHeapSize);
     }
 
-    log_trace(gc, heap)("  Maximum heap size " SIZE_FORMAT, (size_t) reasonable_max);
-    FLAG_SET_ERGO(size_t, MaxHeapSize, (size_t)reasonable_max);
+    if (PrintGCDetails && Verbose) {
+      // Cannot use gclog_or_tty yet.
+      tty->print_cr("  Maximum heap size " SIZE_FORMAT, (size_t) reasonable_max);
+    }
+    FLAG_SET_ERGO(uintx, MaxHeapSize, (uintx)reasonable_max);
   }
 
   // If the minimum or initial heap_size have not been set or requested to be set
   // ergonomically, set them accordingly.
+  //如果InitialHeapSize或min_heap_size没有设置，则进入计算逻辑
   if (InitialHeapSize == 0 || min_heap_size() == 0) {
     julong reasonable_minimum = (julong)(OldSize + NewSize);
 
@@ -387,14 +441,19 @@ void Arguments::set_heap_size() {
 
       reasonable_initial = limit_by_allocatable_memory(reasonable_initial);
 
-      log_trace(gc, heap)("  Initial heap size " SIZE_FORMAT, (size_t)reasonable_initial);
-      FLAG_SET_ERGO(size_t, InitialHeapSize, (size_t)reasonable_initial);
+      if (PrintGCDetails && Verbose) {
+        // Cannot use gclog_or_tty yet.
+        tty->print_cr("  Initial heap size " SIZE_FORMAT, (uintx)reasonable_initial);
+      }
+      FLAG_SET_ERGO(uintx, InitialHeapSize, (uintx)reasonable_initial);
     }
-    // If the minimum heap size has not been set (via -Xms),
-    // synchronize with InitialHeapSize to avoid errors with the default value.
+    // 没设置-Xms，最小heapSize使用InitialHeapSize
     if (min_heap_size() == 0) {
-      set_min_heap_size(MIN2((size_t)reasonable_minimum, InitialHeapSize));
-      log_trace(gc, heap)("  Minimum heap size " SIZE_FORMAT, min_heap_size());
+      set_min_heap_size(MIN2((uintx)reasonable_minimum, InitialHeapSize));
+      if (PrintGCDetails && Verbose) {
+        // Cannot use gclog_or_tty yet.
+        tty->print_cr("  Minimum heap size " SIZE_FORMAT, min_heap_size());
+      }
     }
   }
 }
@@ -408,7 +467,7 @@ void Arguments::set_heap_size() {
 [1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)  
 [2][java|Java Platform, Standard Edition Tools Reference](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/java.html)  
 [3][Cgroup - cpu, cpuacct, cpuset子系统|大彬](https://lessisbetter.site/2020/09/01/cgroup-3-cpu-md/)  
-
+[4][JDK-8146115](https://bugs.openjdk.java.net/browse/JDK-8146115)
 
 
 
