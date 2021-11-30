@@ -14,6 +14,18 @@
 
 建议使用大于8u191版本的JAVA。
 
+这里列举参数的默认值，方便下文说明。
+~~~
+java -XX:+PrintFlagsFinal -version | grep -Ei "maxheapsize|maxram|initialram"
+    uintx DefaultMaxRAMFraction                     = 4                                   {product}
+    uintx InitialRAMFraction                        = 64                                  {product}
+   double InitialRAMPercentage                      = 1.562500                            {product}
+    uintx MaxHeapSize                              := 4139778048                          {product}
+ uint64_t MaxRAM                                    = 137438953472                        {pd product}
+    uintx MaxRAMFraction                            = 4                                   {product}
+   double MaxRAMPercentage                          = 25.000000                           {product}
+~~~
+
 ### java版本<8u121
 
 不要在容器化环境使用。
@@ -38,15 +50,18 @@
 
 ### java版本>=8u191
 
-JDK8u191后新增了容器支持开关`-XX:UseContainerSupport`，并且默认开启。
+JDK8u191后新增了容器支持开关`-XX:UseContainerSupport`，并且默认开启。  
+并增加了这些参数：
+* MaxRAMPercentage 堆的最大值百分比。
+* InitialRAMPercentage 堆的初始化的百分比。
+* MinRAMPercentage 堆的最小值的百分比。
 
 建议使用内存参数参数：
 ````
--XX:MaxRAMPercentage=70 -XX:MinRAMPercentage=70
+-XX:MaxRAMPercentage=70.0 -XX:InitialRAMPercentage=50.0
 ````
 计算方法（这里做了简化，实际计算要复杂些）：  
-`最大堆大小 = MaxRAM（默认为容器最大可使用内存） * MaxRAMPercentage / 100`。  
-最小堆大小同理（InitialRAMPercentage和MinRAMPercentage设置一个即可）。
+`最大堆大小 = MaxRAM（默认为容器最大可使用内存） * MaxRAMPercentage / 100`。
 
 注意：如果使用了-Xmx参数，则不会进入上面的堆大小的计算逻辑，而直接将MaxHeapSize（最大堆大小）等同于我们设置的-Xmx。
 
@@ -56,7 +71,7 @@ JDK8u191后新增了容器支持开关`-XX:UseContainerSupport`，并且默认�
 我对相关方法做了注释。
 
 `osContainer_linux.cpp`是linux的容器信息的读取和计算的类。里面有如下方法：
-~~~
+~~~ 
 /* init
  *
  * Initialize the container support and determine if
