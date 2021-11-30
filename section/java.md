@@ -30,8 +30,13 @@
 
 `osContainer_linux.cpp`
 ~~~
-/* 
+/* init
+ *
+ * Initialize the container support and determine if
+ * we are running under cgroup control.
+ *
  * 容器环境下的初始化和判定
+ *
  */
 void OSContainer::init() {
   int mountid;
@@ -45,18 +50,19 @@ void OSContainer::init() {
   char tmpmount[MAXPATHLEN+1];
   char tmpbase[MAXPATHLEN+1];
   char *p;
-  jlong mem_limit;
-
+  //是否已经初始化
   assert(!_is_initialized, "Initializing OSContainer more than once");
 
   _is_initialized = true;
   _is_containerized = false;
 
+  //修正_unlimited_memory
   _unlimited_memory = (LONG_MAX / os::vm_page_size()) * os::vm_page_size();
 
   if (PrintContainerInfo) {
     tty->print_cr("OSContainer::init: Initializing Container Support");
   }
+  //UseContainerSupport没有打开则跳出去
   if (!UseContainerSupport) {
     if (PrintContainerInfo) {
       tty->print_cr("Container Support not enabled");
@@ -65,6 +71,8 @@ void OSContainer::init() {
   }
 
   /*
+   *
+   * 找到cgroup的挂在点信息
    * Find the cgroup mount point for memory and cpuset
    * by reading /proc/self/mountinfo
    *
@@ -101,6 +109,7 @@ void OSContainer::init() {
                              tmproot,
                              tmpmount);
         if (matched == 6) {
+         //内存信息
           memory = new CgroupSubsystem(tmproot, tmpmount);
         }
         else
@@ -116,6 +125,7 @@ void OSContainer::init() {
                              tmproot,
                              tmpmount);
         if (matched == 6) {
+          //cpuset: 用来绑定cgroup到指定CPU的哪个核上和NUMA节点
           cpuset = new CgroupSubsystem(tmproot, tmpmount);
         }
         else {
@@ -132,7 +142,9 @@ void OSContainer::init() {
                              tmproot,
                              tmpmount);
         if (matched == 6) {
+          //cpu：用来限制cgroup的CPU使用率
           cpu = new CgroupSubsystem(tmproot, tmpmount);
+          //cpuacct: 用来统计cgroup的CPU的使用率
           cpuacct = new CgroupSubsystem(tmproot, tmpmount);
         }
         else {
@@ -149,6 +161,7 @@ void OSContainer::init() {
                              tmproot,
                              tmpmount);
         if (matched == 6) {
+
           cpuacct = new CgroupSubsystem(tmproot, tmpmount);
         }
         else {
@@ -206,6 +219,8 @@ void OSContainer::init() {
   /*
    * Read /proc/self/cgroup and map host mount point to
    * local one via /proc/self/mountinfo content above
+   *
+   * 读取 /proc/self/cgroup 并通过上面的 /proc/self/mountinfo 内容将主机挂载点映射到JVM变量上
    *
    * Docker example:
    * 5:memory:/docker/6558aed8fc662b194323ceab5b964f69cf36b3e8af877a14b80256e93aecb044
@@ -392,6 +407,9 @@ void Arguments::set_heap_size() {
 
 [1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)  
 [2][java|Java Platform, Standard Edition Tools Reference](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/java.html)  
+[3][Cgroup - cpu, cpuacct, cpuset子系统|大彬](https://lessisbetter.site/2020/09/01/cgroup-3-cpu-md/)  
+
+
 
 
 
