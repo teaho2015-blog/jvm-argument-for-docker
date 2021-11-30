@@ -6,9 +6,9 @@
 
 ### 历史
 
-* JDK8u121加入了UseCGroupMemoryLimitForHeap这一参数。(JDK-8170888)
+* JDK8u121加入了UseCGroupMemoryLimitForHeap这一参数，对容器内存设置做支持。(JDK-8170888)
 * JDK8u191后加入了UseContainerSupport、MaxRAMPercentage、MinRAMPercentage、InitialRAMPercentage参数。  
-  deprecate了MaxRAMFraction、MinRAMFraction、InitialRAMFraction参数。
+  deprecate了UseCGroupMemoryLimitForHeap、MaxRAMFraction、MinRAMFraction、InitialRAMFraction参数。
 
 ## 用法
 
@@ -17,13 +17,13 @@
 这里列举参数的默认值，方便下文说明。
 ~~~
 java -XX:+PrintFlagsFinal -version | grep -Ei "maxheapsize|maxram|initialram"
-    uintx DefaultMaxRAMFraction                     = 4                                   {product}
-    uintx InitialRAMFraction                        = 64                                  {product}
-   double InitialRAMPercentage                      = 1.562500                            {product}
-    uintx MaxHeapSize                              := 4139778048                          {product}
- uint64_t MaxRAM                                    = 137438953472                        {pd product}
-    uintx MaxRAMFraction                            = 4                                   {product}
-   double MaxRAMPercentage                          = 25.000000                           {product}
+    uintx DefaultMaxRAMFraction                     = 4                                   {product}  //默认的堆内存系数
+    uintx InitialRAMFraction                        = 64                                  {product}  //初始化堆内存系数，简单来说，机器（容器）内存/InitialRAMFraction=初始化堆内存内存
+   double InitialRAMPercentage                      = 1.562500                            {product}  //初始化堆内存百分比，简单来说，机器（容器）内存*InitialRAMPercentage/100=初始化堆内存大小
+    uintx MaxHeapSize                              := 4139778048                          {product}  //堆的默认最大值
+ uint64_t MaxRAM                                    = 137438953472                        {pd product} //和MaxHeapSize一起，用于运行时MaxHeapSize的计算
+    uintx MaxRAMFraction                            = 4                                   {product}  //最大的堆内存系数，简单来说，机器（容器）内存/MaxRAMFraction=最大堆内存
+   double MaxRAMPercentage                          = 25.000000                           {product}  //最大的堆内存百分比，简单来说，机器（容器）内存*MaxRAMPercentage/100=最大堆内存
 ~~~
 
 ### java版本<8u121
