@@ -324,6 +324,7 @@ void OSContainer::init() {
 
   // We need to update the amount of physical memory now that
   // command line arguments have been processed.
+  // 读取cgroup的内存地址的/memory.limit_in_bytes的内存限制，并设置到JVM全局的物理内存大小变量
   if ((mem_limit = memory_limit_in_bytes()) > 0) {
     os::Linux::set_physical_memory(mem_limit);
   }
