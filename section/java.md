@@ -483,7 +483,8 @@ void Arguments::set_heap_size() {
 [1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)  
 [2][java|Java Platform, Standard Edition Tools Reference](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/java.html)  
 [3][Cgroup - cpu, cpuacct, cpuset子系统|大彬](https://lessisbetter.site/2020/09/01/cgroup-3-cpu-md/)  
-[4][JDK-8146115](https://bugs.openjdk.java.net/browse/JDK-8146115)
+[4][JDK-8146115](https://bugs.openjdk.java.net/browse/JDK-8146115)  
+[5][github-openjdk-jdk8u](https://github.com/AdoptOpenJDK/openjdk-jdk8u)  
 
 
 
