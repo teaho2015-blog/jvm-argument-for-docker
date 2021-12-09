@@ -114,7 +114,7 @@ void OSContainer::init() {
 
   /*
    *
-   * 找到cgroup的挂在点信息
+   * 找到cgroup的挂载点信息
    * Find the cgroup mount point for memory and cpuset
    * by reading /proc/self/mountinfo
    *
@@ -203,7 +203,6 @@ void OSContainer::init() {
                              tmproot,
                              tmpmount);
         if (matched == 6) {
-
           cpuacct = new CgroupSubsystem(tmproot, tmpmount);
         }
         else {
@@ -262,7 +261,7 @@ void OSContainer::init() {
    * Read /proc/self/cgroup and map host mount point to
    * local one via /proc/self/mountinfo content above
    *
-   * 读取 /proc/self/cgroup 并通过上面的 /proc/self/mountinfo 内容将主机挂载点映射到JVM变量上
+   * 读取 /proc/self/cgroup 并通过上面的 /proc/self/mountinfo 内容将本容器的各cgroup子系统的值映射到JVM变量上
    *
    * Docker example:
    * 5:memory:/docker/6558aed8fc662b194323ceab5b964f69cf36b3e8af877a14b80256e93aecb044
@@ -324,7 +323,7 @@ void OSContainer::init() {
 
   // We need to update the amount of physical memory now that
   // command line arguments have been processed.
-  // 读取cgroup的内存地址的/memory.limit_in_bytes的内存限制，并设置到JVM全局的物理内存大小变量
+  // 读取cgroup的内存绑定点(/memory.limit_in_bytes)的内存限制值，并设置到JVM全局的物理内存大小变量
   if ((mem_limit = memory_limit_in_bytes()) > 0) {
     os::Linux::set_physical_memory(mem_limit);
   }
@@ -476,8 +475,6 @@ void Arguments::set_heap_size() {
 
 ~~~
 
-
-
 ## reference
 
 [1][java11 arguments.cpp](http://hg.openjdk.java.net/jdk/jdk11/file/1ddf9a99e4ad/src/hotspot/share/runtime/arguments.cpp#l1750)  
@@ -485,7 +482,11 @@ void Arguments::set_heap_size() {
 [3][Cgroup - cpu, cpuacct, cpuset子系统|大彬](https://lessisbetter.site/2020/09/01/cgroup-3-cpu-md/)  
 [4][JDK-8146115](https://bugs.openjdk.java.net/browse/JDK-8146115)  
 [5][github-openjdk-jdk8u](https://github.com/AdoptOpenJDK/openjdk-jdk8u)  
+[6][proc(5) — Linux manual page](https://man7.org/linux/man-pages/man5/proc.5.html)  
+[7][/proc FILESYSTEM](https://www.kernel.org/doc/Documentation/filesystems/proc.txt)  
+[8][Linux资源管理之cgroups简介|大龙，志超](https://tech.meituan.com/2015/03/31/cgroups.html)  
 
+<!-- 
+[Linux文件系统之mount](https://zhuanlan.zhihu.com/p/144893220)
 
-
-
+-->
